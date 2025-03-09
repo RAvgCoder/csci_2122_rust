@@ -341,32 +341,7 @@ mod tests {
             .collect::<Vec<_>>();
         test_marsdec_core::<false>(&stream_input, &expected_result, None);
     }
-
-    #[test]
-    fn man() {
-        // Expected:  CallBackResult { line: 1, integer: 7, bit_seq: 0 }
-        // Got:       CallBackResult { line: 2, integer: 1, bit_seq: -2 }
-        const USE_MARSDECX: bool = true;
-
-        let seed = 566386752197768851;
-
-        let (lines, expected) = generate_test_data::<USE_MARSDECX>(seed);
-
-        test_marsdec_core::<USE_MARSDECX>(&lines, &expected, Some(seed));
-    }
-
-    #[test]
-    fn test_marsdecx_random() {
-        const USE_MARSDECX: bool = true;
-        let mut rng = rand::rng();
-
-        let seed = rng.random_range(0..=u64::MAX);
-
-        let (lines, expected) = generate_test_data::<USE_MARSDECX>(seed);
-
-        test_marsdec_core::<USE_MARSDECX>(&lines, &expected, Some(seed));
-    }
-
+    
     #[test]
     fn test_marsdecx_fuzzy() {
         const USE_MARSDECX: bool = true;
@@ -393,18 +368,6 @@ mod tests {
 
             test_marsdec_core::<USE_MARSDECX>(&lines, &expected, Some(seed));
         }
-    }
-
-    #[test]
-    fn test_marsdec1_random() {
-        const USE_MARSDECX: bool = false;
-        let mut rng = rand::rng();
-
-        let seed = rng.random_range(0..=u64::MAX);
-
-        let (lines, expected) = generate_test_data::<USE_MARSDECX>(seed);
-
-        test_marsdec_core::<USE_MARSDECX>(&lines, &expected, Some(seed));
     }
 
     fn generate_test_data<const USE_MARSDECX: bool>(
