@@ -39,11 +39,11 @@ impl Assignment2 {
     ) {
         for i in 1.. {
             // Get the next stream else if there are no more streams, then exit
-            let Some(mut hex_stream) = reader.next_stream() else {
+            let Some(mut byte_stream) = reader.next_stream() else {
                 break;
             };
 
-            let mut bit_stream_reader = BitStreamReader::new(&mut hex_stream);
+            let mut bit_stream_reader = BitStreamReader::new(&mut byte_stream);
             for j in 1.. {
                 // Read the first 5 bits to get the size of the next bit sequence to read
                 const HEADER_SIZE: NonZeroU8 = match NonZeroU8::new(5) {
@@ -81,15 +81,26 @@ impl Assignment2 {
 }
 
 mod stream_core {
-    use crate::helpers::make_one_bits;
-    use crate::helpers::size_of_in_bits;
+    use crate::helpers::{read_line, size_of_in_bits};
     use std::fmt::Debug;
     use std::num::NonZeroU8;
 
-    /// A sequence of bits which are right aligned
+    /// A sequence of bits which are left aligned
     pub struct BitSequence {
-        seq: u32,
+        seq: i32,
         len: NonZeroU8,
+    }
+
+    // The alignment of the bits in the sequence
+    // * Bits to store
+    // - Unused bits not to be read
+    #[derive(Debug, Clone, Copy)]
+    #[allow(dead_code)]
+    pub enum Alignment {
+        // |*********-----------------|
+        Left,
+        // |-----------------*********|
+        Right,
     }
 
     impl Debug for BitSequence {
@@ -103,22 +114,27 @@ mod stream_core {
     }
 
     impl BitSequence {
-        pub const fn new(seq: u32, len: NonZeroU8) -> Self {
-            BitSequence { seq, len }
+        pub const fn new(seq: i32, len: NonZeroU8, bit_alignment: Alignment) -> Self {
+            match bit_alignment {
+                Alignment::Left => BitSequence { seq, len },
+                Alignment::Right => BitSequence {
+                    seq: seq << (size_of_in_bits::<u32>() as u8 - len.get()),
+                    len,
+                },
+            }
         }
 
         pub const fn as_raw(&self) -> u32 {
-            self.seq
+            (self.seq as u32) >> (size_of_in_bits::<u32>() as u8 - self.len.get())
         }
 
         pub const fn using_twos_complement(&self) -> i32 {
-            let is_first_bit_set = ((self.seq >> (self.len.get() - 1)) & 1) == 1;
-            let raw_num = self.seq;
+            let is_first_bit_set = self.seq.is_negative();
             if is_first_bit_set {
                 // Use twos complement
-                (raw_num | (-1 << self.len.get()) as u32) as i32
+                self.seq >> (size_of_in_bits::<u32>() as u8 - self.len.get())
             } else {
-                raw_num as i32
+                self.as_raw() as i32
             }
         }
     }
@@ -172,16 +188,14 @@ mod stream_core {
                 self.cache_size += num_bits_to_read;
             }
 
-            // SAFETY: We have already checked that the number of bits is at most 32
-            let result_mask = unsafe { make_one_bits(num_bits.get()) };
-
             // Get the result from the cache and push the bits to the right so that the bits are right aligned
             // Eg For Cache: 1111_0000_0000_0000_0000_0000_0000_0000 => num_bits = 4
             // We get a result to be Result: 0000_0000_0000_0000_0000_0000_0000_1111 => num_bits = 4
-            let result = (self.cache >> (Self::MAX_CACHE_SIZE - num_bits.get())) & result_mask;
+            // SAFETY: We know cache is of type u64 and so a shift would not spread ones to the left
+            let result: u64 = self.cache >> (Self::MAX_CACHE_SIZE - num_bits.get());
 
             // SAFETY for cast: We have already checked that the number of bits is less than or equal to 32
-            let result = BitSequence::new(result as u32, num_bits);
+            let result = BitSequence::new(result as i32, num_bits, Alignment::Right);
 
             // Update the cache
             self.cache <<= num_bits.get();
@@ -248,17 +262,10 @@ mod stream_core {
     }
 
     impl ConsoleReader {
-        fn read_line() -> String {
-            let mut buffer = String::new();
-            std::io::stdin()
-                .read_line(&mut buffer)
-                .expect("Expected to receive a byte stream");
-            buffer
-        }
-
         pub fn new() -> Self {
             ConsoleReader {
-                num_of_streams_left: Self::read_line()
+                num_of_streams_left: read_line(&mut std::io::stdin())
+                    .expect("Expected a valid number")
                     .trim()
                     .parse()
                     .expect("Expected a valid number"),
@@ -276,7 +283,7 @@ mod stream_core {
                 return None;
             }
 
-            let curr_stream = Self::read_line();
+            let curr_stream = read_line(&mut std::io::stdin()).expect("Expected a valid stream");
 
             self.curr_stream_processing = Some(curr_stream);
             self.num_of_streams_left -= 1;
@@ -297,8 +304,8 @@ mod stream_core {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::a2::stream_core::{BitSequence, HexStream};
-    use crate::helpers::{make_one_bits, size_of_in_bits};
+    use crate::a2::stream_core::{Alignment, BitSequence, HexStream};
+    use crate::helpers::size_of_in_bits;
     use rand::rngs::StdRng;
     use rand::{Rng, RngCore, SeedableRng};
 
@@ -341,7 +348,7 @@ mod tests {
             .collect::<Vec<_>>();
         test_marsdec_core::<false>(&stream_input, &expected_result, None);
     }
-    
+
     #[test]
     fn test_marsdecx_fuzzy() {
         const USE_MARSDECX: bool = true;
@@ -384,19 +391,17 @@ mod tests {
 
             let mut bit_shift_tally = 0;
             for integer in 1.. {
-                let first_5 = ((_raw_input >> (size_of_in_bits::<u128>() - 5)) & 0b11111) as u8;
-                _raw_input <<= 5;
+                let first_5: u8 = (_raw_input >> (size_of_in_bits::<u128>() - 5)) as u8;
 
+                _raw_input <<= 5;
                 bit_shift_tally += 5;
 
                 if first_5 == 0 {
                     break;
                 }
 
-                let next_n = (_raw_input >> (size_of_in_bits::<u128>() - first_5 as usize)) as u32
-                    // SAFETY: We know that the maximum number possible from any combination of 5 bits is 31
-                    // which is less than 64
-                    & unsafe { make_one_bits(first_5) } as u32;
+                let next_n: i32 =
+                    (_raw_input >> (size_of_in_bits::<u128>() - first_5 as usize)) as i32;
 
                 _raw_input <<= first_5 as usize;
                 bit_shift_tally += first_5 as usize;
@@ -411,6 +416,7 @@ mod tests {
                     bit_seq: BitSequence::new(
                         next_n,
                         NonZeroU8::new(first_5).expect("Expected a non-zero value"),
+                        Alignment::Right,
                     )
                     .using_twos_complement(),
                 });
