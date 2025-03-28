@@ -22,6 +22,12 @@ pub const fn size_of_in_bits<T>() -> usize {
 /// }
 /// ```
 #[inline(always)]
+#[warn(dead_code)]
 pub const unsafe fn make_one_bits(n: u8) -> u64 {
     (1 << n) - 1
+}
+
+pub fn read_line(std_in: &mut std::io::Stdin) -> Result<String, std::io::Error> {
+    let mut buffer = String::new();
+    std_in.read_line(&mut buffer).map(|_| buffer)
 }
